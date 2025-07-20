@@ -1,4 +1,5 @@
-from .models import RequestLog
+from django.http import HttpResponseForbidden
+from .models import RequestLog, BlockedIP
 
 
 def get_client_ip(request):
@@ -16,10 +17,15 @@ class IPLoggingMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Log the request
+        # Get the client IP
         ip_address = get_client_ip(request)
-        path = request.path
         
+        # Check if IP is blocked
+        if BlockedIP.objects.filter(ip_address=ip_address).exists():
+            return HttpResponseForbidden("Access denied")
+        
+        # Log the request
+        path = request.path
         RequestLog.objects.create(
             ip_address=ip_address,
             path=path
