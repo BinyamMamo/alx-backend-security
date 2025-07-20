@@ -1,4 +1,6 @@
+import requests
 from django.http import HttpResponseForbidden
+from django.core.cache import cache
 from .models import RequestLog, BlockedIP
 
 
@@ -10,6 +12,32 @@ def get_client_ip(request):
     else:
         ip = request.META.get('REMOTE_ADDR')
     return ip
+
+
+def get_geolocation(ip_address):
+    """Get geolocation data for an IP address with caching."""
+    cache_key = f"geo_{ip_address}"
+    geo_data = cache.get(cache_key)
+    
+    if geo_data is None:
+        try:
+            # Using ipapi.co for free geolocation (no API key required)
+            response = requests.get(f"https://ipapi.co/{ip_address}/json/", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                geo_data = {
+                    'country': data.get('country_name', ''),
+                    'city': data.get('city', '')
+                }
+            else:
+                geo_data = {'country': '', 'city': ''}
+        except:
+            geo_data = {'country': '', 'city': ''}
+        
+        # Cache for 24 hours (86400 seconds)
+        cache.set(cache_key, geo_data, 86400)
+    
+    return geo_data
 
 
 class IPLoggingMiddleware:
@@ -24,11 +52,16 @@ class IPLoggingMiddleware:
         if BlockedIP.objects.filter(ip_address=ip_address).exists():
             return HttpResponseForbidden("Access denied")
         
-        # Log the request
+        # Get geolocation data
+        geo_data = get_geolocation(ip_address)
+        
+        # Log the request with geolocation
         path = request.path
         RequestLog.objects.create(
             ip_address=ip_address,
-            path=path
+            path=path,
+            country=geo_data.get('country', ''),
+            city=geo_data.get('city', '')
         )
         
         response = self.get_response(request)
